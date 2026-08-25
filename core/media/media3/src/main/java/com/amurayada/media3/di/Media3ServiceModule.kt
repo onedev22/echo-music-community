@@ -1,0 +1,550 @@
+package com.amurayada.media3.di
+
+import android.app.Activity
+import android.content.Context
+import android.content.Context.BIND_AUTO_CREATE
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
+import androidx.annotation.OptIn
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.Player
+import androidx.media3.common.audio.SonicAudioProcessor
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.DatabaseProvider
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.NoOpCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultLoadControl.DEFAULT_MAX_BUFFER_MS
+import androidx.media3.exoplayer.DefaultLoadControl.DEFAULT_MIN_BUFFER_MS
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.LoadControl
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+import com.amurayada.common.Config.CANVAS_CACHE
+import com.amurayada.common.Config.DOWNLOAD_CACHE
+import com.amurayada.common.Config.MAIN_PLAYER
+import com.amurayada.common.Config.PLAYER_CACHE
+import com.amurayada.common.Config.SERVICE_SCOPE
+import com.amurayada.common.MERGING_DATA_TYPE
+import com.amurayada.domain.extension.now
+import com.amurayada.domain.manager.DataStoreManager
+import com.amurayada.domain.mediaservice.handler.DownloadHandler
+import com.amurayada.domain.mediaservice.handler.MediaPlayerHandler
+import com.amurayada.domain.mediaservice.player.MediaPlayerInterface
+import com.amurayada.domain.repository.CacheRepository
+import com.amurayada.domain.repository.HomeRepository
+import com.amurayada.domain.repository.LocalPlaylistRepository
+import com.amurayada.domain.repository.PlaylistRepository
+import com.amurayada.domain.repository.SearchRepository
+import com.amurayada.domain.repository.SongRepository
+import com.amurayada.domain.repository.StreamRepository
+import com.amurayada.logger.Logger
+import com.amurayada.media3.exoplayer.CrossfadeExoPlayerAdapter
+import com.amurayada.media3.repository.CacheRepositoryImpl
+import com.amurayada.media3.service.SimpleMediaService
+import com.amurayada.media3.service.callback.SimpleMediaSessionCallback
+import com.amurayada.media3.service.download.DownloadUtils
+import com.amurayada.media3.service.mediasourcefactory.MergingMediaSourceFactory
+import com.amurayada.media3.utils.CoilBitmapLoader
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.lastOrNull
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import org.koin.android.ext.koin.androidApplication
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.context.loadKoinModules
+import org.koin.core.qualifier.named
+import org.koin.dsl.module
+import java.net.Proxy
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.toJavaDuration
+
+/**
+ * Required repository first initialization
+ */
+@UnstableApi
+private val mediaServiceModule =
+    module {
+        // Service
+        // CoroutineScope for service
+        single<CoroutineScope>(
+            createdAtStart = true,
+            qualifier = named(SERVICE_SCOPE),
+        ) {
+            CoroutineScope(Dispatchers.Main + SupervisorJob())
+        }
+        // Cache
+        single<DatabaseProvider>(
+            createdAtStart = true,
+        ) {
+            provideDatabaseProvider(androidContext())
+        }
+        // Player Cache
+        single<SimpleCache>(qualifier = named(PLAYER_CACHE), createdAtStart = true) {
+            provideSimpleCache(
+                context = androidContext(),
+                cacheName = "exoplayer",
+                cacheSize = 512, // Default 512MB to avoid blocking main thread during DI init
+                databaseProvider = get<DatabaseProvider>(),
+                isTemp = true,
+            )
+        }
+        // Download Cache
+        single<SimpleCache>(qualifier = named(DOWNLOAD_CACHE), createdAtStart = true) {
+            provideSimpleCache(
+                context = androidContext(),
+                cacheName = "download",
+                cacheSize = -1,
+                databaseProvider = get<DatabaseProvider>(),
+            )
+        }
+        // Spotify Canvas Cache
+        single<SimpleCache>(qualifier = named(CANVAS_CACHE), createdAtStart = true) {
+            provideSimpleCache(
+                context = androidContext(),
+                cacheName = "spotifyCanvas",
+                cacheSize = 128,
+                databaseProvider = get<DatabaseProvider>(),
+                isTemp = true,
+            )
+        }
+        // DownloadUtils
+        single<DownloadHandler>(createdAtStart = true) {
+            DownloadUtils(
+                context = androidContext(),
+                playerCache = get(named(PLAYER_CACHE)),
+                downloadCache = get(named(DOWNLOAD_CACHE)),
+                dataStoreManager = get(),
+                databaseProvider = get(),
+                streamRepository = get(),
+                songRepository = get(),
+            )
+        }
+
+        // AudioAttributes
+        single<AudioAttributes>(createdAtStart = true) {
+            provideAudioAttributes()
+        }
+
+        single<MergingMediaSourceFactory>(createdAtStart = true) {
+            provideMergingMediaSource(
+                androidContext(),
+                get(named(DOWNLOAD_CACHE)),
+                get(named(PLAYER_CACHE)),
+                get(),
+                get(named(SERVICE_SCOPE)),
+                get(),
+            )
+        }
+
+        single<DefaultRenderersFactory>(createdAtStart = true) {
+            provideRendererFactory(androidContext())
+        }
+
+        // Player exposed for UI (video rendering via PlayerView/PlayerSurface).
+        // Points to CrossfadeExoPlayerAdapter's ForwardingPlayer, which delegates to
+        // the currently active ExoPlayer instance. This ensures the video surface is
+        // always connected to the player that's actually playing media.
+        single<Player>(qualifier = named(MAIN_PLAYER)) {
+            (get<MediaPlayerInterface>() as CrossfadeExoPlayerAdapter).forwardingPlayer
+        }
+
+        // CoilBitmapLoader
+        single<CoilBitmapLoader>(createdAtStart = true) {
+            provideCoilBitmapLoader(androidContext(), get(named(SERVICE_SCOPE)))
+        }
+
+        single<MediaPlayerInterface>(createdAtStart = true) {
+            CrossfadeExoPlayerAdapter(
+                context = androidContext(),
+                coroutineScope = get(named(SERVICE_SCOPE)),
+                dataStoreManager = get(),
+                mediaSourceFactory = get(),
+                audioAttributes = get(),
+                streamRepository = get(),
+                cacheRepository = get(),
+            )
+        }
+
+        // MediaSession Callback for main player
+        single<MediaLibrarySession.Callback>(createdAtStart = true) {
+            SimpleMediaSessionCallback(
+                androidApplication(),
+                get<CoroutineScope>(named(SERVICE_SCOPE)),
+                get<MediaPlayerHandler>(),
+                get<SearchRepository>(),
+                get<SongRepository>(),
+                get<LocalPlaylistRepository>(),
+                get<PlaylistRepository>(),
+                get<HomeRepository>(),
+                get<StreamRepository>(),
+                get<DataStoreManager>(),
+            )
+        }
+
+        single<CacheRepository>(createdAtStart = true) {
+            CacheRepositoryImpl(
+                playerCache = get(named(PLAYER_CACHE)),
+                downloadCache = get(named(DOWNLOAD_CACHE)),
+                canvasCache = get(named(CANVAS_CACHE)),
+            )
+        }
+    }
+
+@UnstableApi
+private fun provideResolvingDataSourceFactory(
+    cacheDataSourceFactory: CacheDataSource.Factory,
+    downloadCache: SimpleCache,
+    playerCache: SimpleCache,
+    dataStoreManager: DataStoreManager,
+    streamRepository: StreamRepository,
+    coroutineScope: CoroutineScope,
+): DataSource.Factory {
+    val chunkLength = 10 * 512 * 1024L
+    return ResolvingDataSource.Factory(cacheDataSourceFactory) { dataSpec ->
+        val mediaId = dataSpec.key ?: error("No media id")
+        
+        // Resolve local URIs directly
+        if (mediaId.contains("local:")) {
+            val localId = mediaId.removePrefix(MERGING_DATA_TYPE.VIDEO).removePrefix("local:")
+            val localUri = android.net.Uri.parse("content://media/external/audio/media/$localId")
+            Logger.d("Stream", "Resolving local media: $localId -> $localUri DATA_SPEC: $dataSpec")
+            return@Factory dataSpec.withUri(localUri)
+        }
+        
+        Logger.w("Stream", mediaId)
+        Logger.w("Stream", mediaId.startsWith(MERGING_DATA_TYPE.VIDEO).toString())
+        val length = if (dataSpec.length >= 0) dataSpec.length else 1
+        if (downloadCache.isCached(
+                mediaId,
+                dataSpec.position,
+                length,
+            )
+        ) {
+            coroutineScope.launch(Dispatchers.IO) {
+                streamRepository.updateFormat(
+                    if (mediaId.contains(MERGING_DATA_TYPE.VIDEO)) {
+                        mediaId.removePrefix(MERGING_DATA_TYPE.VIDEO)
+                    } else {
+                        mediaId
+                    },
+                )
+            }
+            Logger.w("Stream", "Downloaded $mediaId")
+            return@Factory dataSpec
+        }
+        val playerCached = playerCache.isCached(mediaId, dataSpec.position, chunkLength)
+        if (playerCached) {
+            coroutineScope.launch(Dispatchers.IO) {
+                streamRepository.updateFormat(
+                    if (mediaId.contains(MERGING_DATA_TYPE.VIDEO)) {
+                        mediaId.removePrefix(MERGING_DATA_TYPE.VIDEO)
+                    } else {
+                        mediaId
+                    },
+                )
+            }
+            Logger.w("Stream", "Cached $mediaId")
+            // Don't return bare video ID as URI — CacheDataSource.openNextSource()
+            // may need a valid HTTP URL for uncached spans beyond this chunk.
+            // Fall through to resolve actual stream URL.
+        }
+        var dataSpecReturn: DataSpec = dataSpec
+        var resolved = false
+        runBlocking(Dispatchers.IO) {
+            if (mediaId.contains(MERGING_DATA_TYPE.VIDEO)) {
+                val id = mediaId.removePrefix(MERGING_DATA_TYPE.VIDEO)
+                streamRepository.getNewFormat(id).lastOrNull()?.let {
+                    val videoUrl = it.videoUrl
+                    if (videoUrl != null && it.expiredTime > now()) {
+                        Logger.d("Stream", videoUrl)
+                        Logger.w("Stream", "Video from format")
+                        val is403Url = streamRepository.is403Url(videoUrl).firstOrNull() != false
+                        Logger.d("Stream", "is 403 $is403Url")
+                        if (!is403Url) {
+                            dataSpecReturn = dataSpec.withUri(videoUrl.toUri())
+                            resolved = true
+                            return@runBlocking
+                        }
+                    }
+                }
+                streamRepository
+                    .getStream(
+                        dataStoreManager,
+                        id,
+                        isDownloading = false,
+                        isVideo = true,
+                    ).lastOrNull()
+                    ?.let {
+                        Logger.d("Stream", it)
+                        Logger.w("Stream", "Video")
+                        dataSpecReturn = dataSpec.withUri(it.toUri())
+                        resolved = true
+                    }
+            } else {
+                streamRepository.getNewFormat(mediaId).lastOrNull()?.let {
+                    val audioUrl = it.audioUrl
+                    if (audioUrl != null && it.expiredTime > now()) {
+                        Logger.d("Stream", audioUrl)
+                        Logger.w("Stream", "Audio from format")
+                        val is403Url = streamRepository.is403Url(audioUrl).firstOrNull() != false
+                        Logger.d("Stream", "is 403 $is403Url")
+                        if (!is403Url) {
+                            dataSpecReturn = dataSpec.withUri(audioUrl.toUri())
+                            resolved = true
+                            return@runBlocking
+                        }
+                    }
+                }
+                streamRepository
+                    .getStream(
+                        dataStoreManager,
+                        mediaId,
+                        isDownloading = false,
+                        isVideo = false,
+                    ).lastOrNull()
+                    ?.let {
+                        Logger.d("Stream", it)
+                        Logger.w("Stream", "Audio")
+                        dataSpecReturn = dataSpec.withUri(it.toUri())
+                        resolved = true
+                    }
+            }
+        }
+        if (!resolved) {
+            Logger.e("Stream", "Failed to resolve stream URL for $mediaId")
+            throw java.io.IOException("Failed to resolve stream URL for $mediaId")
+        }
+        return@Factory dataSpecReturn
+    }
+}
+
+@UnstableApi
+private fun provideExtractorFactory(): ExtractorsFactory =
+    DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
+
+@UnstableApi
+private fun provideMediaSourceFactory(
+    context: Context,
+    downloadCache: SimpleCache,
+    playerCache: SimpleCache,
+    streamRepository: StreamRepository,
+    dataStoreManager: DataStoreManager,
+    coroutineScope: CoroutineScope,
+): DefaultMediaSourceFactory =
+    DefaultMediaSourceFactory(
+        provideResolvingDataSourceFactory(
+            provideCacheDataSource(
+                downloadCache,
+                playerCache,
+                context,
+                dataStoreManager.getJVMProxy()?.let {
+                    Proxy(
+                        when (it.type) {
+                            DataStoreManager.ProxyType.PROXY_TYPE_HTTP -> Proxy.Type.HTTP
+                            DataStoreManager.ProxyType.PROXY_TYPE_SOCKS -> Proxy.Type.SOCKS
+                        },
+                        java.net.InetSocketAddress(it.host, it.port),
+                    )
+                },
+            ),
+            downloadCache,
+            playerCache,
+            dataStoreManager,
+            streamRepository,
+            coroutineScope,
+        ),
+        provideExtractorFactory(),
+    )
+
+@OptIn(UnstableApi::class)
+private fun provideMergingMediaSource(
+    context: Context,
+    downloadCache: SimpleCache,
+    playerCache: SimpleCache,
+    streamRepository: StreamRepository,
+    coroutineScope: CoroutineScope,
+    dataStoreManager: DataStoreManager,
+): MergingMediaSourceFactory =
+    MergingMediaSourceFactory(
+        provideMediaSourceFactory(
+            context,
+            downloadCache,
+            playerCache,
+            streamRepository,
+            dataStoreManager,
+            coroutineScope,
+        ),
+        dataStoreManager,
+    )
+
+@UnstableApi
+private fun provideRendererFactory(context: Context): DefaultRenderersFactory =
+    object : DefaultRenderersFactory(context) {
+        override fun buildAudioSink(
+            context: Context,
+            enableFloatOutput: Boolean,
+            enableAudioTrackPlaybackParams: Boolean,
+        ): AudioSink =
+            DefaultAudioSink
+                .Builder(context)
+                .setEnableFloatOutput(enableFloatOutput)
+                .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                .setAudioProcessorChain(
+                    DefaultAudioSink.DefaultAudioProcessorChain(
+                        emptyArray(),
+                        SilenceSkippingAudioProcessor(
+                            2_000_000,
+                            (20_000 / 2_000_000).toFloat(),
+                            2_000_000,
+                            0,
+                            256,
+                        ),
+                        SonicAudioProcessor(),
+                    ),
+                ).build()
+    }
+
+@UnstableApi
+private fun provideCacheDataSource(
+    downloadCache: SimpleCache,
+    playerCache: SimpleCache,
+    context: Context,
+    proxy: Proxy? = null,
+): CacheDataSource.Factory =
+    CacheDataSource
+        .Factory()
+        .setCache(downloadCache)
+        .setUpstreamDataSourceFactory(
+            CacheDataSource
+                .Factory()
+                .setCache(playerCache)
+                .setUpstreamDataSourceFactory(
+                    DefaultDataSource
+                        .Factory(
+                            context,
+                            OkHttpDataSource.Factory(
+                                OkHttpClient
+                                    .Builder()
+                                    .connectTimeout(30.seconds.toJavaDuration())
+                                    .readTimeout(30.seconds.toJavaDuration())
+                                    .proxy(
+                                        proxy,
+                                    ).addInterceptor(
+                                        HttpLoggingInterceptor()
+                                            .apply {
+                                                level = HttpLoggingInterceptor.Level.HEADERS
+                                            },
+                                    ).build(),
+                            ),
+                        ),
+                ),
+        ).setCacheWriteDataSinkFactory(null)
+        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+@UnstableApi
+private fun provideLoadControl(): LoadControl =
+    DefaultLoadControl
+        .Builder()
+        .setBufferDurationsMs(
+            DEFAULT_MIN_BUFFER_MS * 4,
+            DEFAULT_MAX_BUFFER_MS * 4,
+            // bufferForPlaybackMs=
+            2000,
+            // bufferForPlaybackAfterRebufferMs=
+            4000,
+        ).build()
+
+@UnstableApi
+private fun provideAudioAttributes(): AudioAttributes =
+    AudioAttributes
+        .Builder()
+        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        .setUsage(C.USAGE_MEDIA)
+        .setSpatializationBehavior(C.SPATIALIZATION_BEHAVIOR_AUTO)
+        .build()
+
+@UnstableApi
+private fun provideDatabaseProvider(context: Context) = StandaloneDatabaseProvider(context)
+
+@UnstableApi
+private fun provideSimpleCache(
+    context: Context,
+    cacheName: String,
+    cacheSize: Int = -1,
+    databaseProvider: DatabaseProvider,
+    isTemp: Boolean = false,
+) = SimpleCache(
+    if (isTemp) context.cacheDir.resolve(cacheName) else context.filesDir.resolve(cacheName),
+    when (cacheSize) {
+        -1 -> NoOpCacheEvictor()
+        else -> LeastRecentlyUsedCacheEvictor(cacheSize * 1024 * 1024L)
+    },
+    databaseProvider,
+)
+
+@UnstableApi
+private fun provideCoilBitmapLoader(
+    context: Context,
+    coroutineScope: CoroutineScope,
+): CoilBitmapLoader = CoilBitmapLoader(context, coroutineScope)
+
+@OptIn(UnstableApi::class)
+fun loadMediaService() {
+    loadKoinModules(mediaServiceModule)
+}
+
+@OptIn(UnstableApi::class)
+fun startService(
+    context: Context,
+    serviceConnection: ServiceConnection,
+) {
+    val intent = Intent(context, SimpleMediaService::class.java)
+    try {
+        // Try starting normally. If in background, this might fail on Android 12+.
+        context.startService(intent)
+    } catch (e: Exception) {
+        Logger.e("Service", "startService failed: ${e.message}. Falling back to bindService.")
+    }
+    // bindService will start the service if it's not already running.
+    context.bindService(intent, serviceConnection, BIND_AUTO_CREATE)
+    Logger.d("Service", "Service bind request sent")
+}
+
+@OptIn(UnstableApi::class)
+fun stopService(context: Context) {
+    context.stopService(Intent(context, SimpleMediaService::class.java))
+}
+
+@OptIn(UnstableApi::class)
+fun setServiceActivitySession(
+    context: Context,
+    cls: Class<out Activity>,
+    musicService: IBinder?,
+) {
+    (musicService as? SimpleMediaService.MusicBinder)?.setActivitySession(context, cls)
+}
