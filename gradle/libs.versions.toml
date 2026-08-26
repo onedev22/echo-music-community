@@ -176,7 +176,7 @@ jna-platform = { module = "net.java.dev.jna:jna-platform", version = "5.14.0" }
 datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 androidx-paging-common = { module = "androidx.paging:paging-common", version = "3.3.4" }
 koin-jvm = { module = "io.insert-koin:koin-core-jvm", version = "3.5.3" }
-kotlinx-coroutinesSwing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version = "1.8.0" }
+kotlinx-coroutinesSwing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version = "1.11.0" }
 nucleus-notification = { module = "dev.nucleusframework:nucleus-notification", version = "2.4.4" }
 compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
