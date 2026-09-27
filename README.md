@@ -4,31 +4,10 @@
   <h1>Echo Music</h1>
 
   <p><strong>A modern Android music app with ad-free streaming, synced lyrics, offline playback, and an intuitive user experience.
-</strong></p>
 
-  [![GitHub Release](https://img.shields.io/github/v/release/iad1tya/Echo-Music?style=for-the-badge&color=6f42c1)](https://github.com/iad1tya/Echo-Music/releases)
-  [![GitHub Stars](https://img.shields.io/github/stars/iad1tya/Echo-Music?style=for-the-badge&color=e3b341)](https://github.com/iad1tya/Echo-Music/stargazers)
-  [![License](https://img.shields.io/github/license/iad1tya/Echo-Music?style=for-the-badge&color=28a745)](LICENSE)
-  [![Telegram](https://img.shields.io/badge/Telegram-Join-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/EchoMusicApp)
-  [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/EcfV3AxH5c)
-  [![Weblate](https://img.shields.io/weblate/progress/echo-music?server=https%3A%2F%2Fhosted.weblate.org&style=for-the-badge)](https://hosted.weblate.org/projects/echo-music/)
-  
-  <a href="https://trendshift.io/repositories/20485" target="_blank">
-    <img src="https://trendshift.io/api/badge/repositories/20485" alt="EchoMusicApp%2FEcho-Music | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/>
-  </a>
 
   <br>
 
-  <a href="https://echomusic.fun/download">
-    <img src="assets/download.png" alt="Download" width="180"/>
-  </a>
-  &nbsp;
-  <a href="https://echomusic.fun/obtainium">
-    <img src="assets/obtainium.png" alt="Get it on Obtainium" width="180"/>
-  </a>
-</div>
-
----
 
 ## Overview
 
@@ -36,29 +15,7 @@ Echo Music delivers a seamless, premium listening experience by leveraging YouTu
 
 ---
 
-## Table of Contents
 
-- [Overview](#overview)
-- [Screenshots](#screenshots)
-- [Features](#features)
-  - [What's New](#whats-new)
-  - [Streaming & Playback](#streaming--playback)
-  - [Discovery & Echo Find](#discovery--echo-find)
-  - [Lyrics](#lyrics)
-  - [Integrations](#integrations)
-  - [Smart Playback](#smart-playback)
-  - [Customization](#customization)
-- [Installation & Setup](#installation--setup)
-  - [Android Installation](#android-installation)
-  - [Building from Source](#building-from-source)
-- [Translations](#translations)
-- [Community & Support](#community--support)
-- [Support the Project](#support-the-project)
-  - [Cryptocurrency](#cryptocurrency)
-- [Special Thanks](#special-thanks)
-- [Star History](#star-history)
-
----
 
 ## Screenshots
 
@@ -150,44 +107,7 @@ Echo Music delivers a seamless, premium listening experience by leveraging YouTu
 
 ---
 
-## Installation & Setup
 
-### Android Installation
-
-Download the latest pre-compiled APK from the [Releases Page](https://github.com/iad1tya/Echo-Music/releases/latest).
-
-### Building from Source
-
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/iad1tya/Echo-Music.git
-   cd Echo-Music
-   ```
-
-2. **Configure Android SDK**
-   Create a `local.properties` file:
-   ```bash
-   echo "sdk.dir=/path/to/your/android/sdk" > local.properties
-   ```
-   *(For detailed paths on Windows/macOS/Linux, refer to [SETUP.md](SETUP.md))*
-
-3. **Firebase Configuration (Optional)**
-   Firebase is required for analytics and crash reporting. See the instructions in [SETUP.md](SETUP.md#3-configure-firebase-optional) for adding your `google-services.json`.
-
-4. **Build the Application**
-   Echo Music has two build variants: **FOSS** (without Google Play Services / Cast) and **GMS** (with Cast support).
-   
-   To build the FOSS Universal Debug variant:
-   ```bash
-   ./gradlew assembleUniversalFossDebug
-   ```
-   To build the GMS Universal Debug variant:
-   ```bash
-   ./gradlew assembleUniversalGmsDebug
-   ```
-   *(For optimized ARM64 builds, release builds, or other options, refer to [SETUP.md](SETUP.md))*
-
----
 
 ## Translations
 
@@ -199,36 +119,8 @@ Download the latest pre-compiled APK from the [Releases Page](https://github.com
 
 ---
 
-## Community & Support
 
-Join the community for updates, discussions, and help.
 
-<div align="center">
-  <a href="https://discord.gg/EcfV3AxH5c" style="text-decoration:none;"><img src="assets/discord.png" alt="Discord Logo" width="140" style="margin: 0 10px;"/></a>
-  <a href="https://t.me/EchoMusicApp" style="text-decoration:none;"><img src="assets/telegram.png" alt="Telegram Logo" width="130" style="margin: 0 10px;"/></a>
-</div>
-
----
-
-## Support the Project
-
-If Echo Music has been useful to you, consider supporting its development.
-
-<div align="center">
-  <a href="https://buymeacoffee.com/iad1tya" style="text-decoration:none;"><img src="assets/bmac.png" alt="Buy Me A Coffee Logo" width="140" style="margin: 0 10px;"/></a>
-  <a href="https://intradeus.github.io/http-protocol-redirector/?r=upi://pay?pa=iad1tya@upi&pn=Aditya%20Yadav&am=&tn=Thank%20You" style="text-decoration:none;"><img src="assets/upi.svg" alt="UPI Logo" width="100" style="margin: 0 10px;"/></a>
-  <a href="https://www.patreon.com/cw/iad1tya" style="text-decoration:none;"><img src="assets/patreon3.png" alt="Patreon Logo" width="100" style="margin: 0 10px;"/></a>
-</div>
-
-### Cryptocurrency
-
-| Network | Address |
-| :--- | :--- |
-| Bitcoin | `bc1qcvyr7eekha8uytmffcvgzf4h7xy7shqzke35fy` |
-| Ethereum | `0x51bc91022E2dCef9974D5db2A0e22d57B360e700` |
-| Solana | `9wjca3EQnEiqzqgy7N5iqS1JGXJiknMQv6zHgL96t94S` |
-
----
 
 ## Special Thanks
 
