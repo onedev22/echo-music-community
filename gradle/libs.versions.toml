@@ -49,7 +49,7 @@ coreSplashscreen = "1.2.0"
 ffmpegKit = "6.0-2"
 youtubedlAndroid = "0.17.3"
 playServicesAuth = "21.2.0"
-googleApiClient = "2.9.0"
+googleApiClient = "2.9.1"
 googleDriveApi = "v3-rev20260428-2.0.0"
 browser = "1.8.0"
 
